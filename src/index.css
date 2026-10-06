@@ -1,0 +1,4 @@
+@import "tailwindcss";
+html, body, #root { margin: 0; background: #104839; }
+body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+button { cursor: pointer; }

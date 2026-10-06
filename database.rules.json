@@ -1,0 +1,17 @@
+{
+  "rules": {
+    "rooms": {
+      "$code": {
+        ".read": "$code.matches(/^[0-9]{4}$/)",
+        ".write": "$code.matches(/^[0-9]{4}$/)",
+        ".validate": "newData.child('seed').isString() || !newData.exists()"
+      }
+    },
+    "presence": {
+      "$code": {
+        ".read": "$code.matches(/^[0-9]{4}$/)",
+        "$uid": { ".write": "$code.matches(/^[0-9]{4}$/)" }
+      }
+    }
+  }
+}

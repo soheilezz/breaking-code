@@ -1,0 +1,32 @@
+{
+  "name": "breaking-code",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "android:setup": "node scripts/setup-android.mjs",
+    "android": "vite build && npx cap sync android && npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "@fontsource/lalezar": "^5.0.0",
+    "@fontsource/vazirmatn": "^5.0.0",
+    "firebase": "^10.13.0",
+    "framer-motion": "^11.3.0",
+    "lucide-react": "^0.441.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "tailwindcss": "^4.0.0",
+    "vite": "^5.4.0"
+  }
+}
