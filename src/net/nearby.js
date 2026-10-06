@@ -1,15 +1,25 @@
 // حالت «کنار هم»: بلوتوث + وای‌فای مستقیم با Google Nearby Connections (فقط اپ اندروید).
 // میزبان صاحب state بازیه؛ بقیه فقط حرکت‌شون رو براش می‌فرستن و state جدید رو می‌گیرن.
 import { Capacitor, registerPlugin } from "@capacitor/core";
-import { newGame, normalize, reduce } from "../game/core.js";
+import { DEFAULT_TIMER, newGame, normalize, reduce } from "../game/core.js";
 
 const Nearby = registerPlugin("Nearby");
 export const nearbyAvailable = Capacitor.getPlatform() === "android";
 
 const pack = (o) => JSON.stringify(o);
 
+// همون اول اپ اجازه‌ها رو بخواه، تا موقع میز ساختن/گشتن دست‌به‌سر نشه
+export const prepareNearby = () => (nearbyAvailable ? Nearby.requestAccess().catch(() => {}) : Promise.resolve());
+export const openAppSettings = () => (nearbyAvailable ? Nearby.openAppSettings().catch(() => {}) : Promise.resolve());
+
+export function nearbyMessage(e) {
+  const m = e?.message || "";
+  if (m.includes("ermission")) return "اجازه‌ها کامل نیست: لوکیشن دقیق و دستگاه‌های اطراف رو Allow کن (تنظیمات اپ ← Permissions)";
+  return m || "یه چیزی خراب شد";
+}
+
 export async function hostNearby(me, onState, onPeers) {
-  let state = newGame();
+  let state = newGame(undefined, {}, DEFAULT_TIMER, 0, { hostId: me.id });
   const peers = new Map();
   const push = () => {
     onState(state);

@@ -7,9 +7,10 @@ import { useEffect, useRef, useState } from "react";
 import Home from "./ui/Home";
 import Intro from "./ui/Intro";
 import Table from "./ui/Table";
+import Lobby from "./ui/Lobby";
 import { connectLocal } from "./net/local.js";
 import { connectOnline, createOnlineRoom, roomExists } from "./net/online.js";
-import { hostNearby, joinNearby } from "./net/nearby.js";
+import { hostNearby, joinNearby, nearbyMessage } from "./net/nearby.js";
 
 const linkCode = (new URLSearchParams(location.search).get("room") || "").replace(/\D/g, "").slice(0, 4) || null;
 
@@ -27,6 +28,7 @@ export default function App() {
   const [status, setStatus] = useState("connecting");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [entered, setEntered] = useState(false); // آیا دکمهٔ «ورود به بازی» رو زدی
   const conn = useRef(null);
 
   useEffect(() => localStorage.setItem("breaking-code/me", JSON.stringify(me)), [me]);
@@ -42,7 +44,7 @@ export default function App() {
   const leave = async () => {
     const c = conn.current;
     conn.current = null;
-    setSession(null); setGame(null); setStatus("connecting"); setPeople(null);
+    setSession(null); setGame(null); setStatus("connecting"); setPeople(null); setEntered(false);
     await c?.close?.();
   };
 
@@ -54,7 +56,7 @@ export default function App() {
         conn.current = connectLocal(setGame);
         setSession({ mode: "local" });
       } else if (opts.mode === "online") {
-        const code = opts.create ? await createOnlineRoom() : opts.code;
+        const code = opts.create ? await createOnlineRoom(meNow.id) : opts.code;
         if (!opts.create && !(await roomExists(code))) throw new Error("همچین میزی پیدا نشد، کد رو چک کن");
         conn.current = connectOnline(code, meNow, { onState: setGame, onStatus: setStatus, onPeople: setPeople, spectator: !!opts.spectator });
         setSession({ mode: "online", code, spectator: !!opts.spectator });
@@ -66,7 +68,7 @@ export default function App() {
         setSession({ mode: "nearby", host: false });
       }
     } catch (e) {
-      setError(e?.message?.includes("ermission") ? "اجازهٔ بلوتوث/دستگاه‌های اطراف رو بده" : e?.message || "یه چیزی خراب شد");
+      setError(nearbyMessage(e));
       await leave();
     } finally {
       setBusy(false);
@@ -75,5 +77,8 @@ export default function App() {
 
   if (intro) return <Intro onStart={() => setIntro(false)} />;
   if (!session || !game || !conn.current) return <Home me={me} setName={(name) => setMe({ ...me, name })} onStart={start} error={error} busy={busy || (!!session && !game)} linkCode={linkCode} />;
+  // حالت یه گوشی لابی نداره؛ بقیه (تماشاگرها هم) تا قفل نقش‌ها و دکمهٔ ورود توی لابی می‌مونن
+  const inGame = session.mode === "local" || (game.phase === "ready" && entered);
+  if (!inGame) return <Lobby game={game} me={me} session={session} status={status} people={people} dispatch={(a) => conn.current?.dispatch(a)} onEnter={() => setEntered(true)} onLeave={leave} />;
   return <Table game={game} me={me} session={session} status={status} conn={conn.current} people={people} onLeave={leave} />;
 }

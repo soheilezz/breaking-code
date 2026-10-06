@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Wifi, Bluetooth, Smartphone, ArrowRight, Loader2, Glasses } from "lucide-react";
 import { onlineAvailable } from "../net/online.js";
-import { nearbyAvailable, discoverNearby } from "../net/nearby.js";
+import { nearbyAvailable, discoverNearby, prepareNearby, openAppSettings, nearbyMessage } from "../net/nearby.js";
 import { BrandMark, Felt } from "./bits";
 import { toEn } from "./theme";
 
@@ -25,17 +25,26 @@ export default function Home({ me, setName, onStart, error, busy, linkCode }) {
   const [screen, setScreen] = useState(linkCode ? "joinCode" : "home"); // home | joinCode | scan
   const [code, setCode] = useState(linkCode || "");
   const [tables, setTables] = useState([]);
+  const [scanError, setScanError] = useState("");
+  const [scanTry, setScanTry] = useState(0);
   const nameOk = me.name.trim().length > 0;
   const clean = toEn(code).replace(/\D/g, "");
   const codeOk = clean.length === 4;
   const go = (spectator) => { if (codeOk && (spectator || nameOk)) onStart({ mode: "online", code: clean, spectator }); };
 
+  // همون اول اپ، اجازهٔ لوکیشن و بلوتوث رو بخواه
+  useEffect(() => { prepareNearby(); }, []);
+
   useEffect(() => {
     if (screen !== "scan") return;
     let stop;
-    discoverNearby(setTables).then((s) => (stop = s)).catch(() => {});
-    return () => { stop?.(); setTables([]); };
-  }, [screen]);
+    let dead = false;
+    setScanError("");
+    discoverNearby(setTables)
+      .then((s) => { if (dead) s(); else stop = s; })
+      .catch((e) => setScanError(nearbyMessage(e)));
+    return () => { dead = true; stop?.(); setTables([]); };
+  }, [screen, scanTry]);
 
   return (
     <Felt>
@@ -84,9 +93,17 @@ export default function Home({ me, setName, onStart, error, busy, linkCode }) {
               <h2 className="font-[Lalezar] text-2xl text-[#efe4cc]">میزهای اطراف</h2>
               <button onClick={() => setScreen("home")} className="rounded-md bg-[#ffffff14] p-2"><ArrowRight size={18} /></button>
             </div>
-            {tables.length === 0 && (
+            {scanError ? (
+              <div className="flex flex-col gap-2">
+                <p className="rounded-md bg-[#a8380c] px-3 py-2 text-sm text-white">{scanError}</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setScanTry((n) => n + 1)} className={`${btn} flex-1 bg-[#efe4cc] text-[#082844]`}>دوباره امتحان کن</button>
+                  <button onClick={openAppSettings} className={`${btn} bg-[#ffffff14]`}>تنظیمات اپ</button>
+                </div>
+              </div>
+            ) : tables.length === 0 ? (
               <p className="flex items-center gap-2 text-sm text-[#9fbfb3]"><Loader2 className="animate-spin" size={16} /> دارم می‌گردم… بلوتوث و لوکیشن روشن باشه</p>
-            )}
+            ) : null}
             {tables.map((t) => (
               <button key={t.endpointId} disabled={busy} onClick={() => onStart({ mode: "nearby", endpointId: t.endpointId })} className="flex items-center justify-between rounded-md bg-[#efe4cc] px-4 py-3 text-right text-[#082844]">
                 <span className="font-[Lalezar] text-xl">میز {t.name}</span>

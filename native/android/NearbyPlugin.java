@@ -1,10 +1,18 @@
 package ir.soheil.breakingcode;
 
 import android.Manifest;
+import android.bluetooth.BluetoothAdapter;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.location.LocationManager;
+import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
+
+import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.JSObject;
-import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -41,13 +49,11 @@ import java.util.Set;
 @CapacitorPlugin(
     name = "Nearby",
     permissions = {
-        @Permission(alias = "legacy", strings = { Manifest.permission.ACCESS_FINE_LOCATION }),
-        @Permission(alias = "s", strings = {
-            Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.ACCESS_FINE_LOCATION }),
-        @Permission(alias = "t", strings = {
-            Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.NEARBY_WIFI_DEVICES })
+        // اندروید ۱۲+: لوکیشن دقیق فقط همراه تقریبی و توی یک درخواست قبول می‌شه
+        @Permission(alias = "loc", strings = { Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION }),
+        @Permission(alias = "bt", strings = {
+            Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT }),
+        @Permission(alias = "wifi", strings = { Manifest.permission.NEARBY_WIFI_DEVICES })
     }
 )
 public class NearbyPlugin extends Plugin {
@@ -59,16 +65,74 @@ public class NearbyPlugin extends Plugin {
 
     private ConnectionsClient client() { return Nearby.getConnectionsClient(getContext()); }
 
-    private String alias() {
-        if (Build.VERSION.SDK_INT >= 33) return "t";
-        if (Build.VERSION.SDK_INT >= 31) return "s";
-        return "legacy";
+    private boolean has(String perm) {
+        return ContextCompat.checkSelfPermission(getContext(), perm) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasAccess() {
+        int sdk = Build.VERSION.SDK_INT;
+        boolean bt = has(Manifest.permission.BLUETOOTH_SCAN) && has(Manifest.permission.BLUETOOTH_ADVERTISE) && has(Manifest.permission.BLUETOOTH_CONNECT);
+        if (sdk >= 33) return bt && has(Manifest.permission.NEARBY_WIFI_DEVICES);
+        if (sdk >= 31) return bt && has(Manifest.permission.ACCESS_FINE_LOCATION);
+        return has(Manifest.permission.ACCESS_FINE_LOCATION);
+    }
+
+    private String[] aliases() {
+        int sdk = Build.VERSION.SDK_INT;
+        if (sdk >= 33) return new String[] { "bt", "wifi" };
+        if (sdk >= 31) return new String[] { "bt", "loc" };
+        return new String[] { "loc" };
     }
 
     private boolean ensurePermissions(PluginCall call, String callback) {
-        if (getPermissionState(alias()) == PermissionState.GRANTED) return true;
-        requestPermissionForAlias(alias(), call, callback);
+        if (hasAccess()) return true;
+        requestPermissionForAliases(aliases(), call, callback);
         return false;
+    }
+
+    private boolean locationOn() {
+        LocationManager lm = (LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
+        if (lm == null) return true;
+        if (Build.VERSION.SDK_INT >= 28) return lm.isLocationEnabled();
+        return lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+    }
+
+    private void open(Intent intent) {
+        try { getActivity().startActivity(intent); } catch (Exception ignored) { }
+    }
+
+    // لوکیشن (اندروید ۱۲ و قدیمی‌تر) و بلوتوث باید روشن باشن؛ اگه نبود صفحهٔ روشن کردنش رو باز می‌کنیم
+    private boolean radiosReady(PluginCall call) {
+        if (Build.VERSION.SDK_INT < 33 && !locationOn()) {
+            open(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+            call.reject("لوکیشن (GPS) گوشی خاموشه. روشنش کن و برگرد، دوباره بزن.", "LOCATION_OFF");
+            return false;
+        }
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter != null && !adapter.isEnabled()) {
+            open(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE));
+            call.reject("بلوتوث خاموشه. روشنش کن و دوباره بزن.", "BT_OFF");
+            return false;
+        }
+        return true;
+    }
+
+    // ---------- اجازه‌ها (همون اول اپ صدا زده می‌شه) ----------
+    @PluginMethod
+    public void requestAccess(PluginCall call) {
+        if (ensurePermissions(call, "accessAfterPermission")) call.resolve();
+    }
+
+    @PermissionCallback
+    private void accessAfterPermission(PluginCall call) {
+        if (hasAccess()) call.resolve();
+        else call.reject("Permission denied");
+    }
+
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName())));
+        call.resolve();
     }
 
     // ---------- میزبان ----------
@@ -79,11 +143,12 @@ public class NearbyPlugin extends Plugin {
 
     @PermissionCallback
     private void hostAfterPermission(PluginCall call) {
-        if (getPermissionState(alias()) == PermissionState.GRANTED) doHost(call);
+        if (hasAccess()) doHost(call);
         else call.reject("Permission denied");
     }
 
     private void doHost(PluginCall call) {
+        if (!radiosReady(call)) return;
         AdvertisingOptions options = new AdvertisingOptions.Builder().setStrategy(STRATEGY).build();
         client().startAdvertising(call.getString("name", "میز"), SERVICE_ID, lifecycle, options)
             .addOnSuccessListener(v -> call.resolve())
@@ -98,11 +163,12 @@ public class NearbyPlugin extends Plugin {
 
     @PermissionCallback
     private void discoverAfterPermission(PluginCall call) {
-        if (getPermissionState(alias()) == PermissionState.GRANTED) doDiscover(call);
+        if (hasAccess()) doDiscover(call);
         else call.reject("Permission denied");
     }
 
     private void doDiscover(PluginCall call) {
+        if (!radiosReady(call)) return;
         DiscoveryOptions options = new DiscoveryOptions.Builder().setStrategy(STRATEGY).build();
         client().startDiscovery(SERVICE_ID, discovery, options)
             .addOnSuccessListener(v -> call.resolve())

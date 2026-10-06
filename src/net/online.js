@@ -3,7 +3,7 @@
 //   presence/<کد>   کی الان وصله (بازیکن یا تماشاگر)؛ با قطع شدن خودش پاک می‌شه
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, onValue, runTransaction, get, set, onDisconnect, remove } from "firebase/database";
-import { newGame, newRoomCode, normalize, reduce } from "../game/core.js";
+import { DEFAULT_TIMER, newGame, newRoomCode, normalize, reduce } from "../game/core.js";
 
 const config = {
   apiKey: import.meta.env.VITE_FB_API_KEY,
@@ -20,10 +20,10 @@ const database = () => (db ??= getDatabase(initializeApp(config)));
 let offset = 0; // اختلاف ساعت گوشی با سرور، برای اینکه تایمر همه یکی باشه
 const clock = () => Date.now() + offset;
 
-export async function createOnlineRoom() {
+export async function createOnlineRoom(hostId) {
   for (let k = 0; k < 10; k++) {
     const code = newRoomCode();
-    const res = await runTransaction(ref(database(), `rooms/${code}`), (cur) => (cur === null ? { ...newGame(), createdAt: Date.now() } : undefined));
+    const res = await runTransaction(ref(database(), `rooms/${code}`), (cur) => (cur === null ? { ...newGame(undefined, {}, DEFAULT_TIMER, 0, { hostId }), createdAt: Date.now() } : undefined));
     if (res.committed) return code;
   }
   throw new Error("نشد میز بسازیم، دوباره امتحان کن");
@@ -42,7 +42,8 @@ export function connectOnline(code, me, { onState, onStatus, onPeople, spectator
     onValue(ref(d, ".info/serverTimeOffset"), (snap) => { offset = snap.val() || 0; }),
     onValue(ref(d, `presence/${code}`), (snap) => {
       const all = Object.values(snap.val() || {});
-      onPeople?.({ total: all.length, spectators: all.filter((p) => p.spectator).length });
+      const watchers = all.filter((p) => p.spectator);
+      onPeople?.({ total: all.length, spectators: watchers.length, watchers: watchers.map((p) => p.name || "بی‌نام") });
     }),
     onValue(ref(d, ".info/connected"), (snap) => {
       const up = !!snap.val();

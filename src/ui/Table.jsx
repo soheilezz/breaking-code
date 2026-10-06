@@ -32,7 +32,6 @@ export default function Table({ game, me, session, conn, people, onLeave, status
   useEffect(() => { setSelected(null); }, [turn, game.seed, game.clue?.word]);
   useEffect(() => { if (selected != null && revealed[selected]) setSelected(null); }, [revealed, selected]);
 
-  const join = (team, role) => dispatch({ type: "join", team, role, name: me.name });
   const confirmPick = (i) => { dispatch({ type: "pick", i }); setSelected(null); };
   const giveClue = (e) => {
     e.preventDefault();
@@ -45,7 +44,7 @@ export default function Table({ game, me, session, conn, people, onLeave, status
   let hint = "";
   if (watching) hint = winner ? "" : game.clue ? `تیم ${T.name} داره حدس می‌زنه` : `رئیس ${T.name} داره فکر می‌کنه…`;
   else if (free) hint = localSpy ? "" : game.clue ? "کارت رو بزن، بعد تیک سبز" : "رئیس سرنخ رو بلند بگه یا اینجا بنویسه";
-  else if (!myPlayer) hint = "یه تیم انتخاب کن تا وارد بازی بشی";
+  else if (!myPlayer) hint = "نقشی نداری؛ فقط تماشا می‌کنی";
   else if (winner) hint = "";
   else if (!myTurn) hint = `منتظر تیم ${T.name}…`;
   else if (canClue) hint = "";
@@ -81,8 +80,8 @@ export default function Table({ game, me, session, conn, people, onLeave, status
 
         {!free && (
           <div className="flex gap-4">
-            <Roster team="red" players={game.players} myId={me.id} onJoin={join} align="start" readOnly={watching} />
-            <Roster team="blue" players={game.players} myId={me.id} onJoin={join} align="end" readOnly={watching} />
+            <Roster team="red" players={game.players} myId={me.id} align="start" readOnly />
+            <Roster team="blue" players={game.players} myId={me.id} align="end" readOnly />
           </div>
         )}
 
@@ -107,7 +106,7 @@ export default function Table({ game, me, session, conn, people, onLeave, status
           <div className="flex items-center gap-3">
             <span className="h-3 w-3 rounded-full" style={{ background: T.ink, boxShadow: `0 0 12px ${T.ink}` }} />
             <span className="font-[Lalezar] text-2xl" style={{ color: T.soft }}>نوبت تیم {T.name}</span>
-            {game.timer.on && !winner && <TimerBadge left={secondsLeft} total={game.timer.sec} ink={T.ink} onClick={canManage ? () => setAsk("timer") : undefined} />}
+            {game.timer.on && !winner && <TimerBadge left={secondsLeft} total={game.timer.sec} ink={T.ink} onClick={free ? () => setAsk("timer") : undefined} />}
           </div>
           <div className="flex flex-1 flex-wrap items-center gap-3 sm:justify-center">
             {game.clue ? (
@@ -143,7 +142,7 @@ export default function Table({ game, me, session, conn, people, onLeave, status
             )}
             {!free && isSpy && <span className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-bold" style={{ background: TEAM[myTeam].ink }}><Eye size={16} /> نقشه بازه</span>}
             {watching && <span className="inline-flex items-center gap-1.5 rounded-md bg-[#ffffff14] px-3 py-2 text-sm font-bold"><Glasses size={16} /> تماشاگر</span>}
-            {canManage && !game.timer.on && <TimerBadge left={null} onClick={() => setAsk("timer")} />}
+            {free && !game.timer.on && <TimerBadge left={null} onClick={() => setAsk("timer")} />}
             {canManage && <button onClick={() => setAsk("new")} aria-label="دست جدید" className="rounded-md bg-[#ffffff14] p-2.5"><RotateCcw size={16} /></button>}
             <button onClick={() => setAsk("leave")} aria-label="خروج" className="rounded-md bg-[#ffffff14] p-2.5"><LogOut size={16} /></button>
           </div>

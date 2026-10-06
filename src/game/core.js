@@ -29,8 +29,9 @@ export function makeBoard(seed) {
 export const DEFAULT_TIMER = { on: false, sec: 60 };
 const endsAt = (timer, now) => (timer?.on && now ? now + timer.sec * 1000 : null);
 
-export function newGame(seed = newSeed(), players = {}, timer = DEFAULT_TIMER, now = 0) {
-  return { seed, turn: makeBoard(seed).first, revealed: {}, clue: null, guessesLeft: null, assassinHit: null, players, timer, phaseEndsAt: endsAt(timer, now) };
+// phase: "lobby" = هنوز دارن نقش انتخاب می‌کنن | "ready" = نقش‌ها قفل شده و بازی شروع شده
+export function newGame(seed = newSeed(), players = {}, timer = DEFAULT_TIMER, now = 0, { phase = "lobby", hostId = null } = {}) {
+  return { seed, turn: makeBoard(seed).first, revealed: {}, clue: null, guessesLeft: null, assassinHit: null, players, timer, phaseEndsAt: phase === "ready" ? endsAt(timer, now) : null, phase, hostId };
 }
 
 // Firebase فیلدهای null و آبجکت‌های خالی رو پاک می‌کنه؛ اینجا دوباره پرشون می‌کنیم.
@@ -46,6 +47,8 @@ export function normalize(s) {
     players: s.players || {},
     timer: s.timer ? { on: !!s.timer.on, sec: s.timer.sec || 60 } : DEFAULT_TIMER,
     phaseEndsAt: s.phaseEndsAt ?? null,
+    phase: s.phase === "lobby" ? "lobby" : "ready",
+    hostId: s.hostId || null,
   };
 }
 
@@ -76,8 +79,20 @@ export function reduce(state, action, by, { free = false } = {}) {
   const now = action.now || 0;
   const pass = { turn: other(s.turn), clue: null, guessesLeft: null, phaseEndsAt: endsAt(s.timer, now) };
 
+  // تا وقتی نقش‌ها قفل نشده فقط نشستن، بلند شدن، قفل کردن و تنظیم تایمر مجازه
+  if (s.phase === "lobby" && !["join", "leave", "lock", "setTimer"].includes(action.type)) return s;
+
   switch (action.type) {
+    case "lock": {
+      if (s.phase !== "lobby") return s;
+      if (!free && s.hostId && by !== s.hostId) return s;
+      const list = Object.values(s.players);
+      const full = TEAMS.every((t) => list.some((p) => p.team === t && p.role === "spy") && list.some((p) => p.team === t && p.role === "agent"));
+      if (!full) return s;
+      return { ...s, phase: "ready", phaseEndsAt: endsAt(s.timer, now) };
+    }
     case "join": {
+      if (s.phase !== "lobby") return s;
       const { team, role } = action;
       if (!TEAMS.includes(team) || !["spy", "agent"].includes(role)) return s;
       const spyTaken = Object.entries(s.players).some(([id, p]) => id !== by && p.team === team && p.role === "spy");
@@ -86,6 +101,7 @@ export function reduce(state, action, by, { free = false } = {}) {
       return { ...s, players: { ...s.players, [by]: { name, team, role } } };
     }
     case "leave": {
+      if (s.phase !== "lobby") return s;
       const players = { ...s.players };
       delete players[by];
       return { ...s, players };
@@ -115,11 +131,14 @@ export function reduce(state, action, by, { free = false } = {}) {
       return { ...s, ...pass };
     }
     case "newGame":
-      return newGame(action.seed || newSeed(), s.players, s.timer, now);
+      return newGame(action.seed || newSeed(), s.players, s.timer, now, { phase: s.phase, hostId: s.hostId });
     case "setTimer": {
-      if (!free && !me) return s;
+      if (!free) {
+        if (s.phase !== "lobby") return s; // بعد از قفل نقش‌ها تایمر ثابته
+        if (s.hostId && by !== s.hostId) return s;
+      }
       const timer = { on: !!action.on, sec: Math.max(15, Math.min(600, action.sec | 0 || 60)) };
-      return { ...s, timer, phaseEndsAt: winner ? null : endsAt(timer, now) };
+      return { ...s, timer, phaseEndsAt: winner || s.phase === "lobby" ? null : endsAt(timer, now) };
     }
     case "timeout": {
       if (winner || !s.timer.on || s.phaseEndsAt == null) return s;
