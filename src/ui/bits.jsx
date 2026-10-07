@@ -1,6 +1,8 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { Check, Crown, UserRound } from "lucide-react";
 import { TEAM, fa } from "./theme";
+import { cardArt } from "../game/chars.js";
+import Character from "./Character";
 
 export function Felt({ children }) {
   return (
@@ -15,6 +17,18 @@ export function Felt({ children }) {
       <div className="pointer-events-none absolute inset-0" style={{ boxShadow: "inset 0 0 220px #04201ad0" }} />
       <div className="relative">{children}</div>
     </div>
+  );
+}
+
+/** عکس بازیکن؛ اگه عکس نذاشته باشه یه دایرهٔ رنگی با حرف اول اسمش. */
+export function Avatar({ src, name = "", size = 32, ring }) {
+  const hue = [...name].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 360;
+  const shadow = ring ? `0 0 0 2px ${ring}` : undefined;
+  if (src) return <img src={src} alt="" className="shrink-0 rounded-full object-cover" style={{ width: size, height: size, boxShadow: shadow }} />;
+  return (
+    <span className="grid shrink-0 place-items-center rounded-full font-bold text-white" style={{ width: size, height: size, fontSize: size * 0.45, background: `hsl(${hue} 38% 36%)`, boxShadow: shadow }}>
+      {name.trim()[0] || <UserRound size={size * 0.55} />}
+    </span>
   );
 }
 
@@ -38,65 +52,69 @@ export function Seal({ team, left, active, mirror }) {
   );
 }
 
-export function Card({ word, role, revealed, spy, onClick, onConfirm, selected, disabled, index }) {
+function Art({ role, n }) {
+  const art = cardArt(role, n);
+  if (art.url) return <img src={art.url} alt="" className="h-full w-full object-cover" />;
+  return <Character spec={art.spec} role={role} />;
+}
+
+/**
+ * marks: بازیکن‌هایی که این کارت رو نشونه‌گذاری کردن (همه می‌بینن)
+ * mine: خودم نشونه‌ش کردم؛ تیک تأیید فقط برای خودمه
+ */
+export function Card({ word, role, revealed, spy, onClick, onConfirm, mine, marks = [], disabled, index, artIndex }) {
   const t = TEAM[role];
   const showKey = spy && !revealed;
   const live = !disabled && !revealed;
   return (
     <motion.div
       initial={{ opacity: 0, y: 14, rotate: ((index % 5) - 2) * 0.6 }}
-      animate={{ opacity: 1, y: selected ? -4 : 0, rotate: 0 }}
-      transition={{ delay: selected ? 0 : index * 0.025, type: "spring", stiffness: 260, damping: 22 }}
+      animate={{ opacity: 1, y: mine ? -4 : 0, rotate: 0 }}
+      transition={{ delay: mine ? 0 : index * 0.025, type: "spring", stiffness: 260, damping: 22 }}
       className="relative"
     >
       <motion.button
         type="button"
-        whileHover={live && !selected ? { y: -3 } : {}}
+        whileHover={live && !mine ? { y: -3 } : {}}
         whileTap={live ? { scale: 0.97 } : {}}
         onClick={onClick}
         disabled={!live}
-        aria-pressed={selected}
+        aria-pressed={mine}
         aria-label={`${word}${revealed ? "، " + t.name : ""}`}
         className="relative block aspect-[1.25] w-full overflow-hidden rounded-[6px] text-right disabled:cursor-default sm:aspect-[1.9]"
         style={{
           background: revealed ? (role === "assassin" ? "#1b0a02" : t.soft) : "#efe4cc",
-          boxShadow: selected
+          boxShadow: mine
             ? "0 0 0 3px #46b35a, 0 10px 22px -8px #000c"
             : "0 1px 0 #fff8 inset, 0 6px 14px -6px #000a, 0 2px 0 #c9b893",
           transition: "background .35s, box-shadow .2s",
         }}
       >
-        <div className="absolute inset-x-0 top-[28%] h-px" style={{ background: revealed ? "transparent" : "#c4553a55" }} />
-        {showKey && <div className="absolute inset-0" style={{ boxShadow: `inset 0 0 0 4px ${t.ink}`, background: role === "assassin" ? "#1b0a02" : `${t.ink}1f` }} />}
-        <div className="relative flex h-full flex-col justify-end px-1 py-2 sm:p-3">
-          <span
-            className="block truncate text-center text-[13px] font-extrabold leading-tight sm:text-xl md:text-2xl"
-            style={{ color: showKey && role === "assassin" ? "#efe4cc" : revealed ? (role === "assassin" ? "#7a5a48" : t.deep) : "#1f2a28", opacity: revealed ? 0.45 : 1 }}
-          >
-            {word}
-          </span>
-        </div>
-        <AnimatePresence>
-          {revealed && (
-            <motion.div
-              key="stamp"
-              initial={{ scale: 2.4, opacity: 0, rotate: -24 }}
-              animate={{ scale: 1, opacity: 1, rotate: -9 }}
-              transition={{ type: "spring", stiffness: 520, damping: 18 }}
-              className="pointer-events-none absolute inset-0 grid place-items-center"
-            >
-              <div
-                className="rounded-md border-[3px] px-2 font-[Lalezar] text-2xl leading-[1.3] sm:px-3 sm:text-4xl"
-                style={{ color: role === "assassin" ? "#d23a1a" : t.ink, borderColor: role === "assassin" ? "#d23a1a" : t.ink, mixBlendMode: role === "assassin" ? "normal" : "multiply" }}
-              >
-                {t.name}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {revealed ? (
+          <motion.div initial={{ opacity: 0, scale: 1.18 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 24 }} className="absolute inset-0">
+            <Art role={role} n={artIndex} />
+            <div className="absolute inset-x-0 top-0 h-1" style={{ background: t.ink }} />
+            <div className="absolute inset-x-0 bottom-0 truncate px-1 py-0.5 text-center text-[13px] font-extrabold leading-tight text-white sm:text-xl" style={{ background: "#000a" }}>{word}</div>
+          </motion.div>
+        ) : (
+          <>
+            <div className="absolute inset-x-0 top-[28%] h-px" style={{ background: "#c4553a55" }} />
+            {showKey && <div className="absolute inset-0" style={{ boxShadow: `inset 0 0 0 4px ${t.ink}`, background: role === "assassin" ? "#1b0a02" : `${t.ink}1f` }} />}
+            <div className="relative flex h-full flex-col justify-end px-1 py-2 sm:p-3">
+              <span className="block truncate text-center text-[13px] font-extrabold leading-tight sm:text-xl md:text-2xl" style={{ color: showKey && role === "assassin" ? "#efe4cc" : "#1f2a28" }}>
+                {word}
+              </span>
+            </div>
+          </>
+        )}
       </motion.button>
+      {!revealed && marks.length > 0 && (
+        <div className="pointer-events-none absolute -top-1.5 right-1 z-10 flex -space-x-1.5">
+          {marks.slice(0, 3).map((p) => <Avatar key={p.id} src={p.avatar} name={p.name} size={22} ring={TEAM[p.team]?.ink || "#fff"} />)}
+        </div>
+      )}
       <AnimatePresence>
-        {selected && live && (
+        {mine && live && (
           <motion.button
             key="ok"
             type="button"
@@ -120,7 +138,7 @@ export function Card({ word, role, revealed, spy, onClick, onConfirm, selected, 
 function Chip({ p, crown, mine, t }) {
   return (
     <span className="inline-flex max-w-[9rem] items-center gap-1.5 rounded-full py-0.5 pe-2.5 ps-0.5 text-sm" style={{ background: mine ? t.ink : "#ffffff14" }}>
-      <span className="grid h-6 w-6 place-items-center rounded-full bg-[#ffffff22]"><UserRound size={14} /></span>
+      <Avatar src={p.avatar} name={p.name} size={26} />
       <span className="truncate">{p.name}</span>
       {crown && <Crown size={13} className="shrink-0 text-[#f3d27a]" />}
     </span>

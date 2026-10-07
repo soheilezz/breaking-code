@@ -28,10 +28,17 @@ export function makeBoard(seed) {
 
 export const DEFAULT_TIMER = { on: false, sec: 60 };
 const endsAt = (timer, now) => (timer?.on && now ? now + timer.sec * 1000 : null);
+const arr = (v) => (Array.isArray(v) ? v : v && typeof v === "object" ? Object.values(v) : []);
+const LOG_MAX = 50;
+const AVATAR_MAX = 6500; // حجم state توی حالت بلوتوث محدوده
 
-// phase: "lobby" = هنوز دارن نقش انتخاب می‌کنن | "ready" = نقش‌ها قفل شده و بازی شروع شده
-export function newGame(seed = newSeed(), players = {}, timer = DEFAULT_TIMER, now = 0, { phase = "lobby", hostId = null } = {}) {
-  return { seed, turn: makeBoard(seed).first, revealed: {}, clue: null, guessesLeft: null, assassinHit: null, players, timer, phaseEndsAt: phase === "ready" ? endsAt(timer, now) : null, phase, hostId };
+// phase: "lobby" = دارن نقش انتخاب می‌کنن | "locked" = نقش‌ها قفل، منتظر شروع میزبان | "ready" = بازی در جریانه
+export function newGame(seed = newSeed(), players = {}, timer = DEFAULT_TIMER, now = 0, { phase = "lobby", hostId = null, kicked = {} } = {}) {
+  return {
+    seed, turn: makeBoard(seed).first, revealed: {}, clue: null, guessesLeft: null, assassinHit: null,
+    players, timer, phaseEndsAt: phase === "ready" ? endsAt(timer, now) : null,
+    phase, hostId, log: [], marks: {}, kicked,
+  };
 }
 
 // Firebase فیلدهای null و آبجکت‌های خالی رو پاک می‌کنه؛ اینجا دوباره پرشون می‌کنیم.
@@ -47,8 +54,11 @@ export function normalize(s) {
     players: s.players || {},
     timer: s.timer ? { on: !!s.timer.on, sec: s.timer.sec || 60 } : DEFAULT_TIMER,
     phaseEndsAt: s.phaseEndsAt ?? null,
-    phase: s.phase === "lobby" ? "lobby" : "ready",
+    phase: s.phase === "lobby" || s.phase === "locked" ? s.phase : "ready",
     hostId: s.hostId || null,
+    log: arr(s.log),
+    marks: Object.fromEntries(Object.entries(s.marks || {}).map(([k, v]) => [k, arr(v).map(Number)])),
+    kicked: s.kicked || {},
   };
 }
 
@@ -60,16 +70,28 @@ export function derive(s) {
     ? { team: other(s.assassinHit), why: "assassin", loser: s.assassinHit }
     : left("red") === 0 ? { team: "red", why: "cleared" }
     : left("blue") === 0 ? { team: "blue", why: "cleared" } : null;
-  return { board, revealed, left, winner };
+  // شمارهٔ هر کارت بین کارت‌های هم‌نقشش؛ برای انتخاب عکس پشت کارت
+  const seen = {};
+  const artIndex = board.roles.map((r) => (seen[r] = (seen[r] ?? -1) + 1));
+  return { board, revealed, left, winner, artIndex };
 }
+
+const dropCard = (marks, i) => {
+  const out = {};
+  for (const [id, list] of Object.entries(marks)) {
+    const next = list.filter((x) => x !== i);
+    if (next.length) out[id] = next;
+  }
+  return out;
+};
 
 /**
  * state + action → state جدید. اگه حرکت مجاز نباشه همون state برمی‌گرده.
  * free = حالت تک‌گوشی: کسی نقش نداره، فقط نوبت مهمه و سرنخ اختیاریه.
  * action.now = زمان (میلی‌ثانیه) که لایهٔ شبکه بهش می‌چسبونه؛ برای تایمر.
  *
- * تایمر: هر «فاز» (نوشتن سرنخ توسط رئیس، و حدس زدن مأمورها) timer.sec ثانیه وقت داره.
- * تموم که شد نوبت می‌ره برای تیم مقابل.
+ * مراحل: lobby (انتخاب نقش) ← lock (میزبان تأیید می‌کنه) ← start (میزبان شروع می‌کنه) ← بازی.
+ * تایمر فقط توی lobby و فقط توسط میزبان قابل تنظیمه؛ توی بازی ثابته.
  */
 export function reduce(state, action, by, { free = false } = {}) {
   const s = normalize(state);
@@ -77,28 +99,42 @@ export function reduce(state, action, by, { free = false } = {}) {
   const me = s.players[by];
   const { winner } = derive(s);
   const now = action.now || 0;
-  const pass = { turn: other(s.turn), clue: null, guessesLeft: null, phaseEndsAt: endsAt(s.timer, now) };
+  const pass = { turn: other(s.turn), clue: null, guessesLeft: null, marks: {}, phaseEndsAt: endsAt(s.timer, now) };
+  const isHost = free || !s.hostId || by === s.hostId;
+  const push = (e) => [...s.log, e].slice(-LOG_MAX);
 
-  // تا وقتی نقش‌ها قفل نشده فقط نشستن، بلند شدن، قفل کردن و تنظیم تایمر مجازه
-  if (s.phase === "lobby" && !["join", "leave", "lock", "setTimer"].includes(action.type)) return s;
+  if (s.phase !== "ready" && !["join", "leave", "lock", "start", "setTimer", "kick"].includes(action.type)) return s;
 
   switch (action.type) {
+    case "kick": {
+      if (free || !isHost) return s;
+      const id = String(action.id || "");
+      if (!id || id === by || id === s.hostId) return s;
+      const players = { ...s.players };
+      delete players[id];
+      const marks = { ...s.marks };
+      delete marks[id];
+      return { ...s, players, marks, kicked: { ...s.kicked, [id]: true } };
+    }
     case "lock": {
-      if (s.phase !== "lobby") return s;
-      if (!free && s.hostId && by !== s.hostId) return s;
+      if (s.phase !== "lobby" || !isHost) return s;
       const list = Object.values(s.players);
       const full = TEAMS.every((t) => list.some((p) => p.team === t && p.role === "spy") && list.some((p) => p.team === t && p.role === "agent"));
-      if (!full) return s;
+      return full ? { ...s, phase: "locked" } : s;
+    }
+    case "start": {
+      if (s.phase !== "locked" || !isHost) return s;
       return { ...s, phase: "ready", phaseEndsAt: endsAt(s.timer, now) };
     }
     case "join": {
-      if (s.phase !== "lobby") return s;
+      if (s.phase !== "lobby" || s.kicked[by]) return s;
       const { team, role } = action;
       if (!TEAMS.includes(team) || !["spy", "agent"].includes(role)) return s;
       const spyTaken = Object.entries(s.players).some(([id, p]) => id !== by && p.team === team && p.role === "spy");
       if (role === "spy" && spyTaken) return s;
       const name = String(action.name || "بی‌نام").trim().slice(0, 24) || "بی‌نام";
-      return { ...s, players: { ...s.players, [by]: { name, team, role } } };
+      const av = typeof action.avatar === "string" && action.avatar.startsWith("data:image/") && action.avatar.length < AVATAR_MAX ? action.avatar : "";
+      return { ...s, players: { ...s.players, [by]: { name, team, role, ...(av ? { avatar: av } : {}) } } };
     }
     case "leave": {
       if (s.phase !== "lobby") return s;
@@ -112,14 +148,26 @@ export function reduce(state, action, by, { free = false } = {}) {
       const word = String(action.word || "").trim().slice(0, 30);
       const n = Math.max(0, Math.min(9, action.n | 0));
       if (!word) return s;
-      return { ...s, clue: { word, n }, guessesLeft: n === 0 ? null : n + 1, phaseEndsAt: endsAt(s.timer, now) };
+      const entry = { k: "c", by, name: me?.name || "", team: s.turn, word, n };
+      return { ...s, clue: { word, n }, guessesLeft: n === 0 ? null : n + 1, phaseEndsAt: endsAt(s.timer, now), log: push(entry) };
+    }
+    case "mark": {
+      const i = action.i | 0;
+      if (i < 0 || i > 24 || winner || s.revealed["c" + i]) return s;
+      if (!free && !(me && me.team === s.turn && me.role === "agent" && s.clue)) return s;
+      const cur = s.marks[by] || [];
+      const next = cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i];
+      const marks = { ...s.marks };
+      if (next.length) marks[by] = next; else delete marks[by];
+      return { ...s, marks };
     }
     case "pick": {
       const i = action.i | 0;
       if (i < 0 || i > 24 || winner || s.revealed["c" + i]) return s;
       if (!free && !(me && me.team === s.turn && me.role === "agent" && s.clue)) return s;
       const role = makeBoard(s.seed).roles[i];
-      const next = { ...s, revealed: { ...s.revealed, ["c" + i]: s.turn } };
+      const entry = { k: "p", by, name: me?.name || "", team: s.turn, i, r: role };
+      const next = { ...s, revealed: { ...s.revealed, ["c" + i]: s.turn }, marks: dropCard(s.marks, i), log: push(entry) };
       if (role === "assassin") return { ...next, assassinHit: s.turn };
       if (role !== s.turn) return { ...next, ...pass };
       if (next.guessesLeft != null) return next.guessesLeft <= 1 ? { ...next, ...pass } : { ...next, guessesLeft: next.guessesLeft - 1 };
@@ -131,14 +179,11 @@ export function reduce(state, action, by, { free = false } = {}) {
       return { ...s, ...pass };
     }
     case "newGame":
-      return newGame(action.seed || newSeed(), s.players, s.timer, now, { phase: s.phase, hostId: s.hostId });
+      return newGame(action.seed || newSeed(), s.players, s.timer, now, { phase: s.phase, hostId: s.hostId, kicked: s.kicked });
     case "setTimer": {
-      if (!free) {
-        if (s.phase !== "lobby") return s; // بعد از قفل نقش‌ها تایمر ثابته
-        if (s.hostId && by !== s.hostId) return s;
-      }
-      const timer = { on: !!action.on, sec: Math.max(15, Math.min(600, action.sec | 0 || 60)) };
-      return { ...s, timer, phaseEndsAt: winner || s.phase === "lobby" ? null : endsAt(timer, now) };
+      if (!free && (s.phase !== "lobby" || !isHost)) return s;
+      const timer = { on: !!action.on, sec: Math.max(10, Math.min(3600, action.sec | 0 || 60)) };
+      return { ...s, timer, phaseEndsAt: winner || s.phase !== "ready" ? null : endsAt(timer, now) };
     }
     case "timeout": {
       if (winner || !s.timer.on || s.phaseEndsAt == null) return s;

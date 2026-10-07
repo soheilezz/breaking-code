@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Wifi, Bluetooth, Smartphone, ArrowRight, Loader2, Glasses } from "lucide-react";
+import { Wifi, Bluetooth, Smartphone, ArrowRight, Loader2, Glasses, Camera } from "lucide-react";
 import { onlineAvailable } from "../net/online.js";
 import { nearbyAvailable, discoverNearby, prepareNearby, openAppSettings, nearbyMessage } from "../net/nearby.js";
-import { BrandMark, Felt } from "./bits";
+import { Avatar, BrandMark, Felt } from "./bits";
+import { resizeImage } from "./avatar.js";
 import { toEn } from "./theme";
 
 function Mode({ icon: Icon, title, note, disabled, children }) {
@@ -21,7 +22,7 @@ function Mode({ icon: Icon, title, note, disabled, children }) {
 
 const btn = "rounded-md px-4 py-2.5 text-base font-extrabold";
 
-export default function Home({ me, setName, onStart, error, busy, linkCode }) {
+export default function Home({ me, setName, setAvatar, onStart, error, busy, linkCode }) {
   const [screen, setScreen] = useState(linkCode ? "joinCode" : "home"); // home | joinCode | scan
   const [code, setCode] = useState(linkCode || "");
   const [tables, setTables] = useState([]);
@@ -50,10 +51,18 @@ export default function Home({ me, setName, onStart, error, busy, linkCode }) {
     <Felt>
       <div className="mx-auto flex max-w-md flex-col gap-4 px-4 py-8" style={{ paddingTop: "max(2rem, env(safe-area-inset-top))" }}>
         <div className="flex justify-center"><BrandMark size={1.15} /></div>
-        <label className="mt-2 flex flex-col gap-1.5">
+        <div className="mt-2 flex flex-col gap-1.5">
           <span className="text-sm text-[#9fbfb3]">اسمت سر میز</span>
-          <input value={me.name} onChange={(e) => setName(e.target.value)} maxLength={24} placeholder="مثلاً سهیل" className="rounded-md bg-[#efe4cc] px-3 py-2.5 text-lg font-bold text-[#1f2a28] placeholder:text-[#8b7d62] focus:outline-none" />
-        </label>
+          <div className="flex items-center gap-3">
+            <label className="relative shrink-0 cursor-pointer" aria-label="انتخاب عکس پروفایل">
+              <Avatar src={me.avatar} name={me.name} size={56} ring="#efe4cc" />
+              <span className="absolute -bottom-1 -left-1 grid h-6 w-6 place-items-center rounded-full bg-[#efe4cc] text-[#082844]"><Camera size={13} /></span>
+              <input type="file" accept="image/*" className="sr-only" onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) { try { setAvatar(await resizeImage(f)); } catch { /* عکس خراب */ } } }} />
+            </label>
+            <input value={me.name} onChange={(e) => setName(e.target.value)} maxLength={24} placeholder="مثلاً سهیل" className="min-w-0 flex-1 rounded-md bg-[#efe4cc] px-3 py-2.5 text-lg font-bold text-[#1f2a28] placeholder:text-[#8b7d62] focus:outline-none" />
+          </div>
+          {me.avatar && <button type="button" onClick={() => setAvatar("")} className="self-start text-xs text-[#9fbfb3] underline">حذف عکس</button>}
+        </div>
 
         {error && <p className="rounded-md bg-[#a8380c] px-3 py-2 text-sm text-white">{error}</p>}
 

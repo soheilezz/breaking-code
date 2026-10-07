@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Timer as TimerIcon } from "lucide-react";
 import { fa } from "./theme";
 
-export const TIMER_CHOICES = [30, 45, 60, 90, 120, 180];
 export const fmt = (sec) => `${fa(Math.floor(sec / 60))}:${fa(String(sec % 60).padStart(2, "0"))}`;
 
 /** شمارش معکوس فاز فعلی. وقتی صفر شد و این دستگاه مسئول باشه، timeout می‌فرسته. */
@@ -38,6 +37,51 @@ export function TimerBadge({ left, total, ink, onClick }) {
   );
 }
 
+const toEn = (v) => v.replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/\D/g, "").slice(0, 2);
+const split = (t) => [String(Math.floor(t / 60)), String(t % 60)];
+export const TIMER_MIN = 10;
+export const TIMER_MAX = 3600;
+
+/** کلید روشن/خاموش */
+export function Switch({ on, onChange, label }) {
+  return (
+    <button type="button" onClick={() => onChange(!on)} aria-label={label} aria-pressed={on} className="relative h-6 w-11 shrink-0 rounded-full transition-colors" style={{ background: on ? "#3f7b3c" : "#b9ad93" }}>
+      <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" style={{ right: on ? "2px" : "22px" }} />
+    </button>
+  );
+}
+
+/** زمان دلخواه: دقیقه و ثانیه رو خودت بنویس، یا با ±۱۵ ثانیه جابه‌جا کن. با رفتن از کادر ثبت می‌شه. */
+export function TimerInput({ sec, onChange }) {
+  const [m, setM] = useState(split(sec)[0]);
+  const [s, setS] = useState(split(sec)[1]);
+  useEffect(() => { const [a, b] = split(sec); setM(a); setS(b); }, [sec]);
+  const clamp = (t) => Math.max(TIMER_MIN, Math.min(TIMER_MAX, t));
+  const commit = () => {
+    const total = clamp((parseInt(m, 10) || 0) * 60 + (parseInt(s, 10) || 0));
+    if (total !== sec) onChange(total);
+    else { const [a, b] = split(sec); setM(a); setS(b); }
+  };
+  const field = "w-16 rounded-md bg-white px-1 py-1.5 text-center font-[Lalezar] text-2xl leading-none text-[#082844] focus:outline-none focus:ring-2 focus:ring-[#104839]";
+  const step = "rounded-md bg-[#104839] px-2.5 py-2 font-[Lalezar] text-base leading-none text-white";
+  const onKey = (e) => { if (e.key === "Enter") e.currentTarget.blur(); };
+  return (
+    <div className="flex items-end justify-center gap-2" dir="ltr">
+      <button type="button" onClick={() => onChange(clamp(sec - 15))} className={step}>−{fa(15)}</button>
+      <label className="flex flex-col items-center gap-0.5 text-[11px] text-[#7a6c50]">
+        <input inputMode="numeric" value={m} onChange={(e) => setM(toEn(e.target.value))} onBlur={commit} onKeyDown={onKey} className={field} aria-label="دقیقه" />
+        دقیقه
+      </label>
+      <span className="pb-5 font-[Lalezar] text-2xl text-[#082844]">:</span>
+      <label className="flex flex-col items-center gap-0.5 text-[11px] text-[#7a6c50]">
+        <input inputMode="numeric" value={s} onChange={(e) => setS(toEn(e.target.value))} onBlur={commit} onKeyDown={onKey} className={field} aria-label="ثانیه" />
+        ثانیه
+      </label>
+      <button type="button" onClick={() => onChange(clamp(sec + 15))} className={step}>+{fa(15)}</button>
+    </div>
+  );
+}
+
 export function TimerSettings({ timer, onSave, onClose }) {
   const [on, setOn] = useState(timer.on);
   const [sec, setSec] = useState(timer.sec);
@@ -45,17 +89,11 @@ export function TimerSettings({ timer, onSave, onClose }) {
     <>
       <h2 className="font-[Lalezar] text-4xl">تایمر</h2>
       <p className="mt-2 text-base text-[#3d4a47]">رئیس همین‌قدر وقت داره سرنخ بده، مأمورها هم همین‌قدر برای حدس. تموم شد، نوبت تیم مقابل.</p>
-      <button onClick={() => setOn(!on)} className="mt-4 flex w-full items-center justify-between rounded-md bg-white/60 px-4 py-3 font-bold">
+      <div className="mt-4 flex w-full items-center justify-between rounded-md bg-white/60 px-4 py-3 font-bold">
         <span>{on ? "روشن" : "خاموش"}</span>
-        <span className="relative h-6 w-11 rounded-full transition-colors" style={{ background: on ? "#3f7b3c" : "#b9ad93" }}>
-          <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" style={{ right: on ? "2px" : "22px" }} />
-        </span>
-      </button>
-      <div className="mt-3 grid grid-cols-3 gap-2" style={{ opacity: on ? 1 : 0.4 }}>
-        {TIMER_CHOICES.map((c) => (
-          <button key={c} disabled={!on} onClick={() => setSec(c)} className="rounded-md py-2 font-[Lalezar] text-xl" style={{ background: sec === c ? "#104839" : "#ffffff99", color: sec === c ? "#fff" : "#082844" }}>{fmt(c)}</button>
-        ))}
+        <Switch on={on} onChange={setOn} label="تایمر" />
       </div>
+      {on && <div className="mt-3"><TimerInput sec={sec} onChange={setSec} /></div>}
       <div className="mt-5 flex gap-2">
         <button onClick={() => onSave({ on, sec })} className="rounded-md bg-[#104839] px-5 py-2.5 font-extrabold text-white">ذخیره</button>
         <button onClick={onClose} className="rounded-md px-5 py-2.5 font-bold text-[#104839]">بی‌خیال</button>

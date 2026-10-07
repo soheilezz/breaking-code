@@ -11,6 +11,7 @@ import Lobby from "./ui/Lobby";
 import { connectLocal } from "./net/local.js";
 import { connectOnline, createOnlineRoom, roomExists } from "./net/online.js";
 import { hostNearby, joinNearby, nearbyMessage } from "./net/nearby.js";
+import { unlockAudio } from "./ui/sound.js";
 
 const linkCode = (new URLSearchParams(location.search).get("room") || "").replace(/\D/g, "").slice(0, 4) || null;
 
@@ -28,10 +29,23 @@ export default function App() {
   const [status, setStatus] = useState("connecting");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [entered, setEntered] = useState(false); // آیا دکمهٔ «ورود به بازی» رو زدی
   const conn = useRef(null);
 
   useEffect(() => localStorage.setItem("breaking-code/me", JSON.stringify(me)), [me]);
+
+  // مرورگر تا اولین لمس صدا رو آزاد نمی‌کنه
+  useEffect(() => {
+    window.addEventListener("pointerdown", unlockAudio);
+    return () => window.removeEventListener("pointerdown", unlockAudio);
+  }, []);
+
+  // میزبان بیرونت کرده
+  useEffect(() => {
+    if (game?.kicked?.[me.id]) {
+      setError("میزبان تو رو از میز بیرون کرد");
+      leave();
+    }
+  }, [game?.kicked?.[me.id]]);
 
   // اگه وصل شدن به میز بلوتوثی نگرفت، برگرد خونه
   useEffect(() => {
@@ -44,7 +58,7 @@ export default function App() {
   const leave = async () => {
     const c = conn.current;
     conn.current = null;
-    setSession(null); setGame(null); setStatus("connecting"); setPeople(null); setEntered(false);
+    setSession(null); setGame(null); setStatus("connecting"); setPeople(null);
     await c?.close?.();
   };
 
@@ -76,9 +90,10 @@ export default function App() {
   };
 
   if (intro) return <Intro onStart={() => setIntro(false)} />;
-  if (!session || !game || !conn.current) return <Home me={me} setName={(name) => setMe({ ...me, name })} onStart={start} error={error} busy={busy || (!!session && !game)} linkCode={linkCode} />;
+  if (!session || !game || !conn.current) return <Home me={me} setName={(name) => setMe({ ...me, name })} setAvatar={(avatar) => setMe({ ...me, avatar })} onStart={start} error={error} busy={busy || (!!session && !game)} linkCode={linkCode} />;
   // حالت یه گوشی لابی نداره؛ بقیه (تماشاگرها هم) تا قفل نقش‌ها و دکمهٔ ورود توی لابی می‌مونن
-  const inGame = session.mode === "local" || (game.phase === "ready" && entered);
-  if (!inGame) return <Lobby game={game} me={me} session={session} status={status} people={people} dispatch={(a) => conn.current?.dispatch(a)} onEnter={() => setEntered(true)} onLeave={leave} />;
+  // میزبان که «شروع» رو بزنه، همه خودکار وارد بازی می‌شن؛ کسی که وسط بازی میاد هم مستقیم می‌ره تو.
+  const inGame = session.mode === "local" || game.phase === "ready";
+  if (!inGame) return <Lobby game={game} me={me} session={session} status={status} people={people} dispatch={(a) => conn.current?.dispatch(a)} onLeave={leave} />;
   return <Table game={game} me={me} session={session} status={status} conn={conn.current} people={people} onLeave={leave} />;
 }

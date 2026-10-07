@@ -1,22 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Eye, EyeOff, RotateCcw, LogOut, Bluetooth, Wifi, Smartphone, Users, Glasses } from "lucide-react";
+import { Eye, EyeOff, RotateCcw, LogOut, Bluetooth, Wifi, Smartphone, Users, Glasses, Volume2, VolumeX, UserCog } from "lucide-react";
 import { derive } from "../game/core.js";
 import { TEAM, fa } from "./theme";
 import { BrandMark, Card, Felt, Overlay, Roster, Seal } from "./bits";
-import Invite from "./Invite";
+import Log from "./Log";
+import People from "./People";
 import { TimerBadge, TimerSettings, useCountdown } from "./Timer";
+import { isMuted, setMuted, playCorrect, playWrong } from "./sound.js";
 
 export default function Table({ game, me, session, conn, people, onLeave, status }) {
   const dispatch = conn.dispatch;
   const free = session.mode === "local";
   const watching = !!session.spectator;
-  const { board, revealed, left, winner } = derive(game);
+  const { board, revealed, left, winner, artIndex } = derive(game);
   const myPlayer = game.players[me.id];
   const [localSpy, setLocalSpy] = useState(false);
-  const [ask, setAsk] = useState(null); // "spy" | "new" | "leave" | "timer"
+  const [ask, setAsk] = useState(null); // "spy" | "new" | "leave" | "timer" | "people"
   const [draft, setDraft] = useState({ word: "", n: 1 });
-  const [selected, setSelected] = useState(null);
+  const [muted, setMutedState] = useState(isMuted);
 
   const turn = game.turn;
   const T = TEAM[turn];
@@ -28,11 +30,31 @@ export default function Table({ game, me, session, conn, people, onLeave, status
   const canManage = !watching && (free || session.mode === "online" || session.host);
   const secondsLeft = useCountdown(game, conn, !!winner);
 
-  // انتخاب کارت با عوض شدن نوبت یا برگشتن کارت پاک می‌شه
-  useEffect(() => { setSelected(null); }, [turn, game.seed, game.clue?.word]);
-  useEffect(() => { if (selected != null && revealed[selected]) setSelected(null); }, [revealed, selected]);
+  const isHost = !free && (session.host === true || (!!game.hostId && game.hostId === me.id));
 
-  const confirmPick = (i) => { dispatch({ type: "pick", i }); setSelected(null); };
+  // صدای «درسته» و «غلطه» برای همه، بعد از هر حدس تأییدشده
+  const logLen = game.log.length;
+  const prevLog = useRef(null);
+  useEffect(() => {
+    if (prevLog.current !== null && logLen > prevLog.current) {
+      const e = game.log[logLen - 1];
+      if (e?.k === "p") (e.r === e.team ? playCorrect : playWrong)();
+    }
+    prevLog.current = logLen;
+  }, [logLen]);
+
+  // نشونه‌ها: همه می‌بینن کی روی کدوم کارت دست گذاشته؛ تیک تأیید فقط برای خودشه
+  const myKey = free ? "local" : me.id;
+  const myMarks = game.marks[myKey] || [];
+  const marksByCard = {};
+  if (!free) {
+    for (const [id, list] of Object.entries(game.marks)) {
+      for (const i of list) (marksByCard[i] ||= []).push({ id, ...(game.players[id] || {}) });
+    }
+  }
+  const toggleMark = (i) => dispatch({ type: "mark", i });
+  const confirmPick = (i) => dispatch({ type: "pick", i });
+  const toggleSound = () => { setMuted(!muted); setMutedState(!muted); };
   const giveClue = (e) => {
     e.preventDefault();
     if (!draft.word.trim()) return;
@@ -95,8 +117,10 @@ export default function Table({ game, me, session, conn, people, onLeave, status
               revealed={revealed[i] || !!winner}
               spy={isSpy}
               disabled={!canGuess}
-              selected={selected === i}
-              onClick={() => setSelected(selected === i ? null : i)}
+              artIndex={artIndex[i]}
+              mine={myMarks.includes(i)}
+              marks={marksByCard[i] || []}
+              onClick={() => toggleMark(i)}
               onConfirm={() => confirmPick(i)}
             />
           ))}
@@ -143,12 +167,14 @@ export default function Table({ game, me, session, conn, people, onLeave, status
             {!free && isSpy && <span className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-bold" style={{ background: TEAM[myTeam].ink }}><Eye size={16} /> نقشه بازه</span>}
             {watching && <span className="inline-flex items-center gap-1.5 rounded-md bg-[#ffffff14] px-3 py-2 text-sm font-bold"><Glasses size={16} /> تماشاگر</span>}
             {free && !game.timer.on && <TimerBadge left={null} onClick={() => setAsk("timer")} />}
+            <button onClick={toggleSound} aria-label={muted ? "روشن کردن صدا" : "بی‌صدا"} className="rounded-md bg-[#ffffff14] p-2.5">{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
+            {isHost && <button onClick={() => setAsk("people")} aria-label="بازیکن‌ها" className="rounded-md bg-[#ffffff14] p-2.5"><UserCog size={16} /></button>}
             {canManage && <button onClick={() => setAsk("new")} aria-label="دست جدید" className="rounded-md bg-[#ffffff14] p-2.5"><RotateCcw size={16} /></button>}
             <button onClick={() => setAsk("leave")} aria-label="خروج" className="rounded-md bg-[#ffffff14] p-2.5"><LogOut size={16} /></button>
           </div>
         </section>
 
-        {session.mode === "online" && !watching && <Invite code={session.code} />}
+        {!free && <Log game={game} words={board.words} />}
       </div>
 
       <AnimatePresence>
@@ -157,7 +183,7 @@ export default function Table({ game, me, session, conn, people, onLeave, status
             <h2 className="font-[Lalezar] text-4xl">فقط رئیس‌ها!</h2>
             <p className="mt-2 text-base text-[#3d4a47]">بقیه چشم‌ها رو ببندن.</p>
             <div className="mt-5 flex gap-2">
-              <button onClick={() => { setLocalSpy(true); setSelected(null); setAsk(null); }} className="rounded-md bg-[#104839] px-5 py-2.5 font-extrabold text-white">نشونم بده</button>
+              <button onClick={() => { setLocalSpy(true); setAsk(null); }} className="rounded-md bg-[#104839] px-5 py-2.5 font-extrabold text-white">نشونم بده</button>
               <button onClick={() => setAsk(null)} className="rounded-md px-5 py-2.5 font-bold text-[#104839]">انصراف</button>
             </div>
           </Overlay>
@@ -165,6 +191,11 @@ export default function Table({ game, me, session, conn, people, onLeave, status
         {ask === "timer" && (
           <Overlay onClose={() => setAsk(null)}>
             <TimerSettings timer={game.timer} onClose={() => setAsk(null)} onSave={(t) => { dispatch({ type: "setTimer", ...t }); setAsk(null); }} />
+          </Overlay>
+        )}
+        {ask === "people" && (
+          <Overlay onClose={() => setAsk(null)}>
+            <People game={game} people={people} meId={me.id} onKick={(id) => dispatch({ type: "kick", id })} onClose={() => setAsk(null)} />
           </Overlay>
         )}
         {ask === "new" && (

@@ -41,14 +41,14 @@ export function connectOnline(code, me, { onState, onStatus, onPeople, spectator
     onValue(room, (snap) => onState(normalize(snap.val()))),
     onValue(ref(d, ".info/serverTimeOffset"), (snap) => { offset = snap.val() || 0; }),
     onValue(ref(d, `presence/${code}`), (snap) => {
-      const all = Object.values(snap.val() || {});
-      const watchers = all.filter((p) => p.spectator);
-      onPeople?.({ total: all.length, spectators: watchers.length, watchers: watchers.map((p) => p.name || "بی‌نام") });
+      const all = Object.entries(snap.val() || {}).map(([id, p]) => ({ id, ...p }));
+      const watchers = all.filter((p) => p.spectator).map((p) => ({ id: p.id, name: p.name || "بی‌نام", avatar: p.avatar || "" }));
+      onPeople?.({ total: all.length, spectators: watchers.length, watchers });
     }),
     onValue(ref(d, ".info/connected"), (snap) => {
       const up = !!snap.val();
       onStatus?.(up ? "connected" : "connecting");
-      if (up) onDisconnect(mine).remove().then(() => set(mine, { name: me.name, spectator }));
+      if (up) onDisconnect(mine).remove().then(() => set(mine, { name: me.name, spectator, avatar: me.avatar || "" }));
     }),
   ];
   return {

@@ -1,18 +1,24 @@
 import { useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Crown, UserRound, LogOut, Lock, LogIn, Bluetooth, Glasses } from "lucide-react";
+import { Crown, UserRound, LogOut, Lock, Play, Bluetooth, Glasses, X } from "lucide-react";
 import { TEAMS } from "../game/core.js";
 import { TEAM, fa } from "./theme";
-import { BrandMark, Felt, Overlay } from "./bits";
+import { Avatar, BrandMark, Felt, Overlay } from "./bits";
 import Invite from "./Invite";
-import { TIMER_CHOICES, fmt } from "./Timer";
+import { Switch, TimerInput, fmt } from "./Timer";
 
 const ROLES = [
   { role: "spy", label: "رئیس جاسوس", sub: "نقشه رو می‌بینه", Icon: Crown },
   { role: "agent", label: "مأمور", sub: "حدس می‌زنه", Icon: UserRound },
 ];
 
-function Seat({ team, role, label, sub, Icon, list, myId, locked, onSit, onStand }) {
+const Kick = ({ onClick, name }) => (
+  <button onClick={onClick} aria-label={`بیرون کردن ${name}`} className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#a8380c] text-white">
+    <X size={12} strokeWidth={3} />
+  </button>
+);
+
+function Seat({ team, role, label, sub, Icon, list, myId, frozen, canKick, onSit, onStand, onKick }) {
   const t = TEAM[team];
   const reduce = useReducedMotion();
   const here = list.filter((p) => p.team === team && p.role === role);
@@ -34,41 +40,44 @@ function Seat({ team, role, label, sub, Icon, list, myId, locked, onSit, onStand
             جای خالی
           </motion.div>
         ) : (
-          <div className="flex flex-wrap gap-x-3">
+          <div className="mt-0.5 flex flex-wrap gap-1.5">
             {here.map((p) => (
-              <motion.span key={p.id} initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="max-w-full truncate text-[15px] font-bold text-[#082844]">
-                {p.name}{p.id === myId ? " (تو)" : ""}
+              <motion.span key={p.id} initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[#082844]/10 py-0.5 pe-1.5 ps-0.5 text-[15px] font-bold text-[#082844]">
+                <Avatar src={p.avatar} name={p.name} size={26} ring={t.ink} />
+                <span className="truncate">{p.name}{p.id === myId ? " (تو)" : ""}</span>
+                {canKick && p.id !== myId && <Kick name={p.name} onClick={() => onKick(p.id)} />}
               </motion.span>
             ))}
           </div>
         )}
       </div>
-      {!locked && mineHere && (
+      {!frozen && mineHere && (
         <button onClick={onStand} className="rounded-md bg-[#082844] px-3.5 py-1.5 text-sm font-extrabold text-white">بلند شو</button>
       )}
-      {!locked && !mineHere && !taken && (
+      {!frozen && !mineHere && !taken && (
         <button onClick={onSit} className="rounded-md px-3.5 py-1.5 text-sm font-extrabold text-white" style={{ background: t.ink }}>بشین</button>
       )}
     </div>
   );
 }
 
-export default function Lobby({ game, me, session, status, people, dispatch, onEnter, onLeave }) {
+export default function Lobby({ game, me, session, status, people, dispatch, onLeave }) {
   const [ask, setAsk] = useState(null); // "lock" | "leave"
-  const locked = game.phase === "ready";
+  const locked = game.phase === "locked"; // نقش‌ها قفل شده، منتظر شروع میزبان
   const isHost = session.host === true || (!!game.hostId && game.hostId === me.id);
+  const watching = !!session.spectator;
   const list = Object.entries(game.players).map(([id, p]) => ({ id, ...p }));
   const mine = list.find((p) => p.id === me.id);
   const complete = TEAMS.every(
     (tm) => list.some((p) => p.team === tm && p.role === "spy") && list.some((p) => p.team === tm && p.role === "agent")
   );
   const live = status === "connected" || session.host === true;
-  const watching = !!session.spectator;
   const timer = game.timer;
-  const canSetTimer = isHost && !locked;
+  const canSetTimer = isHost && game.phase === "lobby";
   const watchers = people?.watchers || [];
+  const kick = (id) => dispatch({ type: "kick", id });
   const setTimer = (patch) => dispatch({ type: "setTimer", on: timer.on, sec: timer.sec, ...patch });
-  const sit = (team, role) => dispatch({ type: "join", team, role, name: me.name });
+  const sit = (team, role) => dispatch({ type: "join", team, role, name: me.name, avatar: me.avatar });
 
   return (
     <Felt>
@@ -136,9 +145,11 @@ export default function Lobby({ game, me, session, status, people, dispatch, onE
                     Icon={r.Icon}
                     list={list}
                     myId={me.id}
-                    locked={locked || watching}
+                    frozen={locked || watching}
+                    canKick={isHost && session.mode === "online"}
                     onSit={() => sit(tm, r.role)}
                     onStand={() => dispatch({ type: "leave" })}
+                    onKick={kick}
                   />
                 ))}
               </section>
@@ -167,8 +178,12 @@ export default function Lobby({ game, me, session, status, people, dispatch, onE
               <p className="mt-1 text-sm text-[#86a99c]">هنوز کسی تماشا نمی‌کنه. QR یا لینک پایین صفحه رو بفرست.</p>
             ) : (
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {watchers.map((n, i) => (
-                  <span key={i} className="max-w-[9rem] truncate rounded-full bg-[#ffffff14] px-3 py-1 text-sm">{n}</span>
+                {watchers.map((w) => (
+                  <span key={w.id} className="inline-flex max-w-[12rem] items-center gap-1.5 rounded-full bg-[#ffffff14] py-0.5 pe-2 ps-0.5 text-sm">
+                    <Avatar src={w.avatar} name={w.name} size={26} />
+                    <span className="truncate">{w.name}{w.id === me.id ? " (تو)" : ""}</span>
+                    {isHost && w.id !== me.id && <Kick name={w.name} onClick={() => kick(w.id)} />}
+                  </span>
                 ))}
               </div>
             )}
@@ -179,31 +194,33 @@ export default function Lobby({ game, me, session, status, people, dispatch, onE
           <div className="flex items-center justify-between px-3 py-2">
             <h2 className="font-[Lalezar] text-2xl">تایمر</h2>
             {canSetTimer ? (
-              <button onClick={() => setTimer({ on: !timer.on })} aria-label={timer.on ? "خاموش کردن تایمر" : "روشن کردن تایمر"} className="relative h-6 w-11 rounded-full transition-colors" style={{ background: timer.on ? "#3f7b3c" : "#b9ad93" }}>
-                <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" style={{ right: timer.on ? "2px" : "22px" }} />
-              </button>
+              <Switch on={timer.on} onChange={(on) => setTimer({ on })} label="تایمر" />
             ) : (
               <span className="text-sm font-bold">{timer.on ? `${fmt(timer.sec)} برای هر نوبت` : "خاموش"}</span>
             )}
           </div>
           {canSetTimer && timer.on && (
-            <div className="grid grid-cols-3 gap-2 border-t-[1.5px] border-dashed border-[#c9b893] p-3">
-              {TIMER_CHOICES.map((c) => (
-                <button key={c} onClick={() => setTimer({ sec: c })} className="rounded-md py-2 font-[Lalezar] text-xl" style={{ background: timer.sec === c ? "#104839" : "#ffffff99", color: timer.sec === c ? "#fff" : "#082844" }}>{fmt(c)}</button>
-              ))}
+            <div className="border-t-[1.5px] border-dashed border-[#c9b893] p-3">
+              <TimerInput sec={timer.sec} onChange={(sec) => setTimer({ sec })} />
             </div>
           )}
           <p className="border-t-[1.5px] border-dashed border-[#c9b893] px-3 py-2 text-xs text-[#7a6c50]">
-            {locked ? "تایمر قفل شده و داخل بازی عوض نمی‌شه." : "رئیس همین‌قدر وقت داره سرنخ بده و مأمورها همین‌قدر برای حدس. بعد از تأیید نقش‌ها دیگه عوض نمی‌شه."}
+            {game.phase === "lobby"
+              ? "هر زمانی بخوای بنویس، یا خاموشش کن. رئیس همین‌قدر وقت داره سرنخ بده و مأمورها همین‌قدر برای حدس. بعد از تأیید نقش‌ها دیگه عوض نمی‌شه."
+              : "تایمر قفل شده و داخل بازی عوض نمی‌شه."}
           </p>
         </section>
 
         <section className="flex flex-col items-center gap-2">
           {locked ? (
             <>
-              <button onClick={onEnter} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#efe4cc] py-2 font-[Lalezar] text-2xl text-[#082844]">
-                <LogIn size={22} /> {watching ? "ورود به تماشا" : "ورود به بازی"}
-              </button>
+              {isHost ? (
+                <button onClick={() => dispatch({ type: "start" })} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#efe4cc] py-2 font-[Lalezar] text-2xl text-[#082844]">
+                  <Play size={20} fill="currentColor" /> ورود به بازی
+                </button>
+              ) : (
+                <p className="rounded-lg bg-[#082844] px-4 py-2.5 text-center text-sm text-[#cfe0d8]">منتظر میزبان تا بازی رو شروع کنه…</p>
+              )}
               <p className="text-center text-sm text-[#9fbfb3]">
                 {watching
                   ? "تماشاگری؛ نقش‌ها قفل شده."
@@ -242,7 +259,7 @@ export default function Lobby({ game, me, session, status, people, dispatch, onE
         {ask === "lock" && (
           <Overlay onClose={() => setAsk(null)}>
             <h2 className="font-[Lalezar] text-4xl">نقش‌ها رو قفل کنم؟</h2>
-            <p className="mt-2 text-base text-[#3d4a47]">بعدش کسی نمی‌تونه نقشش رو عوض کنه.</p>
+            <p className="mt-2 text-base text-[#3d4a47]">بعدش کسی نمی‌تونه نقشش رو عوض کنه، و تایمر هم ثابت می‌شه.</p>
             <div className="mt-5 flex gap-2">
               <button onClick={() => { dispatch({ type: "lock" }); setAsk(null); }} className="rounded-md bg-[#104839] px-5 py-2.5 font-extrabold text-white">آره، قفل کن</button>
               <button onClick={() => setAsk(null)} className="rounded-md px-5 py-2.5 font-bold text-[#104839]">نه</button>
@@ -252,7 +269,9 @@ export default function Lobby({ game, me, session, status, people, dispatch, onE
         {ask === "leave" && (
           <Overlay onClose={() => setAsk(null)}>
             <h2 className="font-[Lalezar] text-4xl">از میز بری؟</h2>
-            <p className="mt-2 text-base text-[#3d4a47]">{isHost ? "تو میزبانی؛ بری، میز برای همه بسته می‌شه." : "هر وقت خواستی برمی‌گردی."}</p>
+            <p className="mt-2 text-base text-[#3d4a47]">
+              {session.host ? "تو میزبان بلوتوثی؛ بری، میز برای همه بسته می‌شه." : "میز می‌مونه؛ هر وقت خواستی با همون کد برمی‌گردی."}
+            </p>
             <div className="mt-5 flex gap-2">
               <button onClick={onLeave} className="rounded-md bg-[#a8380c] px-5 py-2.5 font-extrabold text-white">برم</button>
               <button onClick={() => setAsk(null)} className="rounded-md px-5 py-2.5 font-bold text-[#104839]">بمونم</button>
